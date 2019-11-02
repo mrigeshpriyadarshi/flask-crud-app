@@ -1,118 +1,173 @@
-import pymysql
 from app import app
+from bson.json_util import dumps
+from flask import jsonify, request
+from flask import flash, render_template, redirect
+import logging
+import settings
 from tables import Results
-from db_config import mysql
-from flask import flash, render_template, request, redirect
-from werkzeug import generate_password_hash, check_password_hash
-import boto3
+import json
+
+from lib import db
+
+logging.basicConfig(level=logging.DEBUG, filename='server.log', datefmt='%I:%M:%S %p',)
+
 
 @app.route('/new_user')
 def add_user_view():
 	return render_template('add.html')
-		
+
+
 @app.route('/add', methods=['POST'])
 def add_user():
-	try:		
-		_name = request.form['inputName']
-		_email = request.form['inputEmail']
-		_password = request.form['inputPassword']
-		# validate the received values
-		if _name and _email and _password and request.method == 'POST':
-			#do not save password as a plain text
-			_hashed_password = generate_password_hash(_password)
-			# save edits
-			sql = "INSERT INTO tbl_user(user_name, user_email, user_password) VALUES(%s, %s, %s)"
-			data = (_name, _email, _hashed_password,)
-			conn = mysql.connect()
-			cursor = conn.cursor()
-			cursor.execute(sql, data)
-			conn.commit()
-			flash('User added successfully!')
-			return redirect('/')
-		else:
-			return 'Error while adding user'
-	except Exception as e:
-		print(e)
-	finally:
-		cursor.close() 
-		conn.close()
+	customer_id = request.form['customerId']
+	name = request.form['inputName']
+	email = request.form['inputEmail']
+	surname = request.form['inputSurname']
+	# validate the received values
+	if name and email and surname and request.method == 'POST':
+		# save details
+		id = db.add({'_id': customer_id, 'name': name, 'email': email, 'surname': surname})
+		flash('User added successfully!')
+		return redirect('/')
+	else:
+		return not_found()
 		
 @app.route('/')
 def users():
 	try:
-		conn = mysql.connect()
-		cursor = conn.cursor(pymysql.cursors.DictCursor)
-		cursor.execute("SELECT * FROM tbl_user")
-		rows = cursor.fetchall()
+		rows = db.get_data()
 		table = Results(rows)
 		table.border = True
 		return render_template('users.html', table=table)
 	except Exception as e:
 		print(e)
-	finally:
-		cursor.close() 
-		conn.close()
+		
+@app.route('/user/<customer_id>')
+def user(customer_id):
+	user = db.get_customer(customer_id)
+	resp = dumps(user)
+	return resp
 
-@app.route('/edit/<int:id>')
+
+@app.route('/edit/<id>')
 def edit_view(id):
 	try:
-		conn = mysql.connect()
-		cursor = conn.cursor(pymysql.cursors.DictCursor)
-		cursor.execute("SELECT * FROM tbl_user WHERE user_id=%s", id)
-		row = cursor.fetchone()
+		row = db.get_customer(id)
 		if row:
-			return render_template('edit.html', row=row)
+			return render_template('update.html', row=row)
 		else:
-			return 'Error loading #{id}'.format(id=id)
+			return 'Error loading #{customer_id}'.format(customer_id=id)
 	except Exception as e:
 		print(e)
-	finally:
-		cursor.close()
-		conn.close()
+
 
 @app.route('/update', methods=['POST'])
 def update_user():
-	try:		
-		_name = request.form['inputName']
-		_email = request.form['inputEmail']
-		_password = request.form['inputPassword']
-		_id = request.form['id']
-		# validate the received values
-		if _name and _email and _password and _id and request.method == 'POST':
-			#do not save password as a plain text
-			_hashed_password = generate_password_hash(_password)
-			print(_hashed_password)
+	customer_id = request.form['customerId']
+	name = request.form['inputName']
+	email = request.form['inputEmail']
+	surname = request.form['inputSurname']
+
+	# validate the received values
+	try:
+		if name and email and surname and customer_id and request.method == 'POST':
 			# save edits
-			sql = "UPDATE tbl_user SET user_name=%s, user_email=%s, user_password=%s WHERE user_id=%s"
-			data = (_name, _email, _hashed_password, _id,)
-			conn = mysql.connect()
-			cursor = conn.cursor()
-			cursor.execute(sql, data)
-			conn.commit()
+			db.update({'customer_id': customer_id, 'name': name, 'email': email, 'surname': surname})
 			flash('User updated successfully!')
 			return redirect('/')
 		else:
-			return 'Error while updating user'
+			return not_found()
 	except Exception as e:
 		print(e)
-	finally:
-		cursor.close() 
-		conn.close()
+
+
 		
-@app.route('/delete/<int:id>')
+@app.route('/delete/<id>')
 def delete_user(id):
-	try:
-		conn = mysql.connect()
-		cursor = conn.cursor()
-		cursor.execute("DELETE FROM tbl_user WHERE user_id=%s", (id,))
-		conn.commit()
-		flash('User deleted successfully!')
-		return redirect('/')
-	except Exception as e:
-		print(e)
-	finally:
-		cursor.close() 
-		conn.close()
-		
+	db.delete(id)
+	flash('User deleted successfully!')
+	return redirect('/')
+
+
+@app.errorhandler(404)
+def not_found(error=None):
+    message = {
+        'status': 404,
+        'message': 'Not Found: ' + request.url,
+    }
+    resp = jsonify(message)
+    resp.status_code = 404
+
+    return resp
+
+
+# API SECTION
+
+@app.route('/api/v1/adduser')
+def api_add_user():
+        _json = request.json
+        customer_id = _json['customer_id']
+        name = _json['name']
+        email = _json['email']
+        surname = _json['surname']
+        # validate the received values
+        if name and email and password and request.method == 'POST':
+            # save details
+            id = db.add({'customer_id': customer_id, 'name': name, 'email': email, 'surname': surname})
+            resp = jsonify('User added successfully!')
+            resp.status_code = 200
+            return resp
+        else:
+            return not_found()
+
+
+@app.route('/api/v1/listusers')
+def api_get_users():
+        try:
+                rows = db.get_data()
+                resp = dumps(rows, indent=4)
+                # resp = json.dumps(rows, indent=4)
+                return resp
+        except Exception as e:
+                print(e)
+
+@app.route('/api/v1/listuser/<customer_id>')
+def api_get_user(customer_id):
+        try:
+                user = db.get_customer(customer_id)
+                resp = dumps(rows, indent=4)
+                # resp = json.dumps(user, indent=4)
+                return resp
+        except Exception as e:
+                print(e)
+
+@app.route('/api/v1/update/<customer_id>', methods=['PUT'])
+def api_update_user(customer_id):
+    try:
+        _json = request.json
+        customer_id = _json['customer_id']
+        name = _json['name']
+        email = _json['email']
+        surname = _json['surname']
+        # validate the received values
+        if name and email and surname and customer_id and request.method == 'PUT':
+            # save edits
+            db.update({'customer_id': customer_id, 'name': name, 'email': email, 'surname': surname})
+            resp = jsonify('User updated successfully!')
+            resp.status_code = 200
+            return resp
+        else:
+            return not_found()
+    except Exception as e:
+        print(e)
+        print("in update")
+
+@app.route('/api/v1/delete/<customer_id>', methods=['DELETE'])
+def api_delete_user(customer_id):
+	db.delete(customer_id)
+	resp = jsonify('User deleted successfully!')
+	resp.status_code = 200
+	return resp
+
 if __name__ == "__main__":
-    app.run()
+    app.run(host='0.0.0.0')
