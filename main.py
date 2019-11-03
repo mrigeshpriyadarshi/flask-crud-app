@@ -6,10 +6,11 @@ import logging
 import settings
 from tables import Results
 import json
+import os
 
 from lib import db
 
-logging.basicConfig(level=logging.DEBUG, filename='server.log', datefmt='%I:%M:%S %p',)
+logging.basicConfig(level=logging.DEBUG, filename=os.environ['log_dir'] + '/server.log', datefmt='%I:%M:%S %p',)
 
 
 @app.route('/new_user')
